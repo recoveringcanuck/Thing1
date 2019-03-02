@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>ThingiTrode WiFi Setup</title>
+</head>
+<body>
+<h1>Simple Wifi Setup Page</h1>
+<p>
+To set the access point for this module simply enter the SSID and password.  This will be saved to memory then the module will reset and attempt to connect.  If this does not work, or if your WiFi settings change, you can reset this any time by holding the setup button down and resetting the unit.  To reset the unit you can either turn it on and off, or hit the reset button.
+</p>
+<form action="/config" method="get" enctype="text/plain">
+SSID: <input type="text" name="ssid" value="ssid" size="30" maxlength="50" /><br>
+Password: <input type="text" name="password" value="password" size="30" maxlength="50" /><br>
+<button type="submit">Save Settings</button>
+</form>
+</body>
+</html>
