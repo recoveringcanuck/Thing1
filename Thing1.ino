@@ -172,11 +172,13 @@ void runConfigureMode()
   while(millis() < configTime || modeSet == false)
   {
     server.handleClient();
-    clientLoop();
+    
     if(!modeSet)
     {
       modeSet = fetchMode();
       }
+      else
+      clientLoop();
       if(WiFi.status() == WL_CONNECTED && doneConnection == false)
       {
         Serial.println("WiFi connected"); 
@@ -293,6 +295,7 @@ bool fetchMode()
   pinModes[7] = root["D7"]; // 0
   pinModes[8] = root["D8"]; // 0
 
+  updateModes();
   return true;
   }
   else
@@ -300,6 +303,26 @@ bool fetchMode()
   return false;
  }
 }
+
+void updateModes()
+{
+  for(int i = 0; i<9; i++)
+  {
+    switch(pinModes[i])
+    {
+      case 0: 
+        pinMode(pinNumbers[i], INPUT);
+        break;
+      case 1:
+        pinMode(pinNumbers[i], OUTPUT);
+        break;
+      case 2:
+        pinMode(pinNumbers[i], OUTPUT);
+        break;
+      }
+    }
+  
+  }
 bool fetchCmd()
 {
   const size_t capacity = JSON_OBJECT_SIZE(10) + 70;
@@ -310,9 +333,13 @@ bool fetchCmd()
   Serial.println(sha1(stateJSON()+secret));
   if(me.code == HTTP_CODE_OK)
   {
-  Serial.println(me.payload);
-  JsonObject& root = jsonBuffer.parseObject(me.payload);
-  
+    int cmds = linesInString(me.payload);
+    Serial.print("received lines: ");
+    Serial.println(cmds-1);
+    for(int i = 1; i <= cmds-1; i++)
+    {
+    processCmd(getLine(me.payload, i));
+    }
   return true;
   }
   else
@@ -365,9 +392,29 @@ void initModes()
       }
     }
   }
-void processCmd()
+void processCmd(String cmd)
 {
+  Serial.println(cmd);
+  const size_t capacity = JSON_OBJECT_SIZE(10) + 70;
+  DynamicJsonBuffer jsonBuffer(capacity);
+
+  JsonObject& root = jsonBuffer.parseObject(cmd);
+
+ 
+  int cmdID = root["cmdID"]; // 1
+  switch(cmdID)
+  {
+    case 1:
+    Serial.print("writing pin, val ");
+    Serial.print((int)root["pin"]);
+    Serial.print(",");
+    Serial.println((int)root["payload"]);
+    int pinNo = root["pin"];
+    digitalWrite(pinNumbers[pinNo], root["payload"]);
+    break;
+    }
   
+
   }
 
 void clientLoop()
@@ -376,21 +423,33 @@ fetchCmd();
   delay(500); 
 }
 
-void cmdInput(int pin)
+String getLine(String data, int index)
 {
-  pinMode(pinNumbers[pin], INPUT);
-  pinStates[pin] = digitalRead(pinNumbers[pin]);
+  int found = 0;
+  int strIndex[] = {0, -1};
+  int maxIndex = data.length()-1;
+  char separator = '\n';
+  for(int i=0; i<=maxIndex && found<=index; i++){
+    if(data.charAt(i)==separator || i==maxIndex){
+        found++;
+        strIndex[0] = strIndex[1]+1;
+        strIndex[1] = (i == maxIndex) ? i+1 : i;
+    }
   }
+
+  return found>index ? data.substring(strIndex[0], strIndex[1]) : "";
+}
+int linesInString(String data)
+{
   
-void cmdOutput(int pin)
-{
-   pinMode(pinNumbers[pin], OUTPUT);
-   digitalWrite(pinNumbers[pin], pinCmds[pin]);
-   pinStates[pin] = digitalRead(pinNumbers[pin]);
+   int found = 0;
+  int maxIndex = data.length()-1;
+  char separator = '\n';
+  for(int i=0; i<=maxIndex; i++){
+    if(data.charAt(i)==separator){
+        found++;
+    }
   }
-void cmdPWM(int pin)
-{
-  pinMode(pinNumbers[pin], OUTPUT);
-  analogWrite(pinNumbers[pin], pinCmds[pin]);
-  pinStates[pin] = pinCmds[pin];
+  return found;
+  
   }
