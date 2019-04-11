@@ -1,3 +1,8 @@
+
+/*Thing1 is the first prototype device designed to work with the create-a-thing.com platform.
+ * it contains a relay, an RGB led, two buttons, and a humidity/temperature sensor
+ */
+
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
@@ -8,76 +13,37 @@
 #include <ArduinoJson.h>
 #include "DHT.h"
 #include <Hash.h>
-#define DHTPIN D6
-#define DHTTYPE DHT11
+
+//base URL of webservice
+String baseURL = "http://foc-electronics.com/iotv2/";
 
 /* Set these to your desired credentials. */
 const char *APSsid = "IOTSetup";
-const char *kUUID = "RelayBox1";
-const char *secret = "8675309";
+const char *kUUID = "x4Su6j7zE0"; //change this to be configurable
+const char *secret = "vH6rOjvYPlDUtaiNwvcegKj8epsmY6mt"; //change this to be configurable
 
 String *uuid; 
 String ssid;
 String password;
-bool configureMode = false;
-//ESP8266WiFiMulti WiFiMulti;
-int green = 512;
-int red = 512;
-int blue = 512;
+
 String payload;
 float change = 0;
 int errCnt = 0;
+int pinNumbers[] = {D0, D1, D2, D3, D4, D5, D6, D7, D8};
+long pinCmds[9];
+long pinStates[9];
+int pinModes[9];
+bool modeSet = false;
 
 
-
-
-
-DHT dht(DHTPIN, DHTTYPE);
+struct httpResponse
+{
+  int code;
+  String payload;
+  };
 
 ESP8266WebServer server(80);
 
-void logInt(int me, String var)
-{
-  if ((WiFi.status() == WL_CONNECTED)) {
-
-    HTTPClient http;
-
-    static String logIntURL = "http://foc-electronics.com/iot/logIntSecure.php?";
-    String argStr = String("uuid=") + *uuid + String("&value=") + String(me) + String("&var=") + var;
-    
-    
-    String myURL = logIntURL + argStr + "&check=" + sha1(argStr + secret);
-    Serial.println(myURL);
-    http.begin(myURL.c_str()); //HTTP
-
-      Serial.print("[HTTP] GET...\n");
-    // start connection and send HTTP header
-    Serial.print("beginning get.  Took: ");
-    int start = millis();
-    int httpCode = http.GET();
-    Serial.println(millis()-start);
-    // httpCode will be negative on error
-    if (httpCode > 0) {
-      // file found at server
-      if (httpCode == HTTP_CODE_OK) {
-        payload = http.getString();
-        Serial.println(payload);
-      }
-
-    } else {
-      Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
-    //  WiFi.reconnect(); //getting errors where esp8266 still thinks it's connected, but all get requests are being rejected
-                            //(probably not getting through) resetting the module fixes it so try just reconnecting first 
-      errCnt++;
-    }
-    
-  }
-  else
-  {
-    Serial.println("can't seem to connect to wifi");
-   
-  }
-  }
 
 void handleConfig()
 {
@@ -124,7 +90,7 @@ void handleRoot() {
 }
 void setupAP()
 {
-  WiFi.mode(WIFI_AP);
+//  WiFi.mode(WIFI_AP);
   Serial.println();
   Serial.print("Configuring access point...");
   /* You can remove the password parameter if you want the AP to be open. */
@@ -138,11 +104,10 @@ void setupAP()
   server.begin();
   Serial.println("HTTP server started");
   SPIFFS.begin();
-  configureMode = true;
 }
 void setupClient()
 {
-  WiFi.mode(WIFI_STA);
+//  WiFi.mode(WIFI_STA);
   Serial.println("Entering client mode");
   SPIFFS.begin();
   File passwordFile = SPIFFS.open("/password.txt", "r");
@@ -158,15 +123,13 @@ void setupClient()
 
   WiFi.begin(ssid.c_str(), password.c_str() );
 
-   while (WiFi.status() != WL_CONNECTED) {
+  /* while (WiFi.status() != WL_CONNECTED) {
      delay(500);
      Serial.print(".");
-    }
+    }*/
 
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
+    
+
 
   
   Serial.print("UUID is: ");
@@ -176,133 +139,258 @@ void setupClient()
 
 void setup() {
 
+   //setup all the IOs (power up with pullups off, everything set to input)
+   for(int i = 0; i < 9; i++)
+   {
+    digitalWrite(pinNumbers[i], LOW);
+    pinMode(pinNumbers[i], INPUT);
+    }
+
   uuid = new String(kUUID);
 
-
   
-  pinMode(D0, OUTPUT);
-  pinMode(D1, OUTPUT);
-  pinMode(D2, OUTPUT);
-  pinMode(D3, OUTPUT);
-  pinMode(D4, OUTPUT);
-  pinMode(D5, OUTPUT);
-  pinMode(D6, OUTPUT);
-  pinMode(D7, OUTPUT);
-  pinMode(D8, OUTPUT);
-
-  
-  digitalWrite(D0, HIGH);
+  WiFi.mode(WIFI_AP_STA);
 
   delay(1000);
   Serial.begin(115200);
-  if (!digitalRead(D0))
-  {
-    setupAP();
-  }
-  else
-  {
-    setupClient();
-  }
-  dht.begin();
-}
 
-
-void loop() {
-  if (configureMode)
-    server.handleClient();
-  else
-  {
-    clientLoop();
-  }
-}
-void reportInputs()
-{
+ 
   
-  }
-void updateOutputs()
+  
+  setupAP();
+  
+  setupClient();
+
+  runConfigureMode();
+}
+
+void runConfigureMode()
 {
-  String updateURL  = String("http://foc-electronics.com/iot/readState.php?uuid=")+*uuid+String("&check=")+sha1(*uuid+secret);
+  long configTime = 1000*60*5;
+  long startTime = millis();
+  bool doneConnection = false;
+  while(millis() < configTime || modeSet == false)
+  {
+    server.handleClient();
+    clientLoop();
+    if(!modeSet)
+    {
+      modeSet = fetchMode();
+      }
+      if(WiFi.status() == WL_CONNECTED && doneConnection == false)
+      {
+        Serial.println("WiFi connected"); 
+        Serial.println("IP address: ");
+        Serial.println(WiFi.localIP());
+        doneConnection = true;
+        }
+    } 
+  Serial.println("shutting down access point");
+  WiFi.mode(WIFI_STA);
+  }
+  
+void loop() {
+    clientLoop();
+    if(errCnt >9)
+    {
+    WiFi.reconnect();
+    
+    }
+}
 
- if ((WiFi.status() == WL_CONNECTED)) {
-
+httpResponse getReq(String myURL)
+{
     HTTPClient http;
+    httpResponse retVal;
+    
+    Serial.print("[HTTP] begin...\n");
 
-    //Serial.print("[HTTP] begin...\n");
-    // configure traged server and url
-    //http.begin("https://foc-electronics.com:443/webservices/ethchange.php"); //HTTPS
-    http.begin(updateURL.c_str()); //HTTP
+    http.begin(myURL.c_str()); //HTTP
 
     //  Serial.print("[HTTP] GET...\n");
     // start connection and send HTTP header
-    int httpCode = http.GET();
+    retVal.code = http.GET();
 
-    // httpCode will be negative on error
-    if (httpCode > 0) {
+    
+    if (retVal.code > 0) {
       // HTTP header has been send and Server response header has been handled
-      //Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+      Serial.printf("[HTTP] GET... code: %d\n", retVal.code);
 
       // file found at server
-      if (httpCode == HTTP_CODE_OK) {
-        payload = http.getString();
-        Serial.println(payload);
+      if (retVal.code == HTTP_CODE_OK) {
+        retVal.payload = http.getString();
+        Serial.println(retVal.payload);
+        errCnt = 0;
       }
-
     } else {
-      Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+      Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(retVal.code).c_str());
+      errCnt++;
     }
+    
+    
+    http.end();
+    return retVal;
+  }
+
+httpResponse postReq(String myURL, String post)
+{
+    HTTPClient http;
+    httpResponse retVal;
+    
+    Serial.print("[HTTP] begin...\n");
+
+    http.begin(myURL.c_str()); //HTTP
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    //  Serial.print("[HTTP] GET...\n");
+    // start connection and send HTTP header
+    
+    retVal.code = http.POST(post.c_str());
+
+    
+    if (retVal.code > 0) {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("[HTTP] POST... code: %d\n", retVal.code);
+
+      // file found at server
+      if (retVal.code == HTTP_CODE_OK) {
+        retVal.payload = http.getString();
+        Serial.println(retVal.payload);
+        errCnt = 0;
+      }
+    } else {
+      Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(retVal.code).c_str());
+      errCnt++;
+    }
+    
+    
+    http.end();
+    return retVal;
+  }
   
-  const size_t capacity = JSON_OBJECT_SIZE(10) + 100;
+
+
+bool fetchMode()
+{
+  const size_t capacity = JSON_OBJECT_SIZE(10) + 70;
   DynamicJsonBuffer jsonBuffer(capacity);
-  const char* json = payload.c_str();
 
-  JsonObject& root = jsonBuffer.parseObject(json);
-
-
-  int d0 = root["D0"]; // 1
-   int d1 = root["D1"]; // 1
-    int d2 = root["D2"]; // 1
-     int d3 = root["D3"]; // 1
-      int d4 = root["D4"]; // 1
-       int d5 = root["D5"]; // 1
-        int d6 = root["D6"]; // 1
-   int d7 = root["D7"]; // 1
-    int d8 = root["D8"]; // 1
-
-    Serial.println(d0);
-    Serial.println(d1);
-    Serial.println(d2);
-    Serial.println(d3);
-    Serial.println(d4);
-    Serial.println(d5);
-    Serial.println(d6);
-    Serial.println(d7);
-    Serial.println(d8);
-
-    digitalWrite(D0, d0);
-    digitalWrite(D1, d1);
-    digitalWrite(D2, d2);
-    digitalWrite(D3, d3);
-    digitalWrite(D4, d4);
-    digitalWrite(D5, d5);
-    digitalWrite(D6, d6);
-    digitalWrite(D7, d7);
-    digitalWrite(D8, d8);
-
-    delay(1000);
-
- }
- else
+  httpResponse me = getReq(baseURL+"getMode.php?dev="+kUUID);
+  
+  if(me.code == HTTP_CODE_OK)
   {
-    Serial.println("can't seem to connect to wifi");
-    errCnt++;
-    delay(1000);
+  
+
+  JsonObject& root = jsonBuffer.parseObject(me.payload);
+
+  const char* ID = root["ID"]; // "testBox1"
+  pinModes[0] = root["D0"]; // 0
+  pinModes[1] = root["D1"]; // 0
+  pinModes[2] = root["D2"]; // 0
+  pinModes[3] = root["D3"]; // 0
+  pinModes[4] = root["D4"]; // 0
+  pinModes[5] = root["D5"]; // 0
+  pinModes[6] = root["D6"]; // 0
+  pinModes[7] = root["D7"]; // 0
+  pinModes[8] = root["D8"]; // 0
+
+  return true;
   }
- 
- 
+  else
+  {
+  return false;
+ }
+}
+bool fetchCmd()
+{
+  const size_t capacity = JSON_OBJECT_SIZE(10) + 70;
+  DynamicJsonBuffer jsonBuffer(capacity);
+
+  httpResponse me = postReq(baseURL+"cmdList.php", String("dev=")+kUUID+"&json="+stateJSON()+"&checksum="+sha1(stateJSON()+secret));
+  Serial.print("sending checksum: ");
+  Serial.println(sha1(stateJSON()+secret));
+  if(me.code == HTTP_CODE_OK)
+  {
+  Serial.println(me.payload);
+  JsonObject& root = jsonBuffer.parseObject(me.payload);
+  
+  return true;
   }
+  else
+  {
+  return false;
+ }
+}
+
+String stateJSON()
+{
+  String retVal;
+const size_t capacity = JSON_OBJECT_SIZE(10);
+DynamicJsonBuffer jsonBuffer(capacity);
+
+JsonObject& root = jsonBuffer.createObject();
+root["ID"] = kUUID;
+root["D0"] = pinStates[0];
+root["D1"] = pinStates[1];
+root["D2"] = pinStates[2];
+root["D3"] = pinStates[3];
+root["D4"] = pinStates[4];
+root["D5"] = pinStates[5];
+root["D6"] = pinStates[6];
+root["D7"] = pinStates[7];
+root["D8"] = pinStates[8];
+
+root.printTo(retVal);
+  return retVal;
+  }
+
+void initModes()
+{
+  for(int i = 0; i < 9; i++)
+  {
+    switch(pinModes[i])
+    {
+      case 0:
+        pinMode(pinNumbers[i], 0);
+        break;
+        
+      case 1:
+        pinMode(pinNumbers[i], INPUT);
+        digitalWrite(pinNumbers[i], LOW);
+        break;
+      case 2:
+        
+      
+      default:
+        pinMode(pinNumbers[i], 0);
+      }
+    }
+  }
+void processCmd()
+{
+  
+  }
+
 void clientLoop()
 {
-  updateOutputs();
-   if(errCnt >9)
-    WiFi.reconnect();
+fetchCmd();
+  delay(500); 
 }
+
+void cmdInput(int pin)
+{
+  pinMode(pinNumbers[pin], INPUT);
+  pinStates[pin] = digitalRead(pinNumbers[pin]);
+  }
+  
+void cmdOutput(int pin)
+{
+   pinMode(pinNumbers[pin], OUTPUT);
+   digitalWrite(pinNumbers[pin], pinCmds[pin]);
+   pinStates[pin] = digitalRead(pinNumbers[pin]);
+  }
+void cmdPWM(int pin)
+{
+  pinMode(pinNumbers[pin], OUTPUT);
+  analogWrite(pinNumbers[pin], pinCmds[pin]);
+  pinStates[pin] = pinCmds[pin];
+  }
