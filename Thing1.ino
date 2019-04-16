@@ -19,8 +19,8 @@ String baseURL = "http://foc-electronics.com/iotv2/";
 
 /* Set these to your desired credentials. */
 const char *APSsid = "IOTSetup";
-const char *kUUID = "x4Su6j7zE0"; //change this to be configurable
-const char *secret = "vH6rOjvYPlDUtaiNwvcegKj8epsmY6mt"; //change this to be configurable
+const char *kUUID = "relayBox1"; //change this to be configurable
+const char *secret = "8675309"; //change this to be configurable
 
 String *uuid; 
 String ssid;
@@ -196,7 +196,7 @@ void loop() {
     if(errCnt >9)
     {
     WiFi.reconnect();
-    
+    errCnt = 0;
     }
 }
 
@@ -206,13 +206,14 @@ httpResponse getReq(String myURL)
     httpResponse retVal;
     
     Serial.print("[HTTP] begin...\n");
-
+    long start = millis();
     http.begin(myURL.c_str()); //HTTP
 
     //  Serial.print("[HTTP] GET...\n");
     // start connection and send HTTP header
     retVal.code = http.GET();
 
+    Serial.println(millis()-start);
     
     if (retVal.code > 0) {
       // HTTP header has been send and Server response header has been handled
@@ -240,14 +241,15 @@ httpResponse postReq(String myURL, String post)
     httpResponse retVal;
     
     Serial.print("[HTTP] begin...\n");
-
+    
     http.begin(myURL.c_str()); //HTTP
+    long start = millis();
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
     //  Serial.print("[HTTP] GET...\n");
     // start connection and send HTTP header
     
     retVal.code = http.POST(post.c_str());
-
+    Serial.println(millis()-start);
     
     if (retVal.code > 0) {
       // HTTP header has been send and Server response header has been handled
@@ -419,10 +421,28 @@ void processCmd(String cmd)
 
 void clientLoop()
 {
+  updateStates();
 fetchCmd();
-  delay(500); 
+  delay(1000); 
 }
-
+void updateStates()
+{
+  for(int i = 0; i <9; i++)
+  {
+    switch(pinModes[i])
+    {
+      case 0:
+        pinStates[i] = digitalRead(pinNumbers[i]);
+        break;
+      case 1: 
+        pinStates[i] = digitalRead(pinNumbers[i]);
+        break;
+      case 2:
+        pinStates[i] = digitalRead(pinCmds[i]);
+        break;
+      }
+    }
+  }
 String getLine(String data, int index)
 {
   int found = 0;
